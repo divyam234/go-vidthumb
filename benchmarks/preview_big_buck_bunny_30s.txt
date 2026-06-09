@@ -1,0 +1,36 @@
+Preview benchmark: Big Buck Bunny 1080p 30s
+================================================
+
+Input: /mnt/data/big-buck-bunny-1080p-30sec.mp4
+FFmpeg shared build: /mnt/data/ffmpeg-8.1
+FFmpeg CLI reference: /mnt/data/ffmpeg-8.1/bin/ffmpeg
+Options: 12 slices × 2.5s, final width 640, 4 workers
+Run mode: sequential. Go API and FFmpeg CLI were not run at the same time.
+
+Resource benchmark command:
+
+go run ./cmd/previewbench \
+  --input /mnt/data/big-buck-bunny-1080p-30sec.mp4 \
+  --out /mnt/data/go-media-previewer-matchbench-output \
+  --ffmpeg /mnt/data/ffmpeg-8.1/bin/ffmpeg \
+  --workers 4 \
+  --preview-slices 12 \
+  --slice-seconds 2.5 \
+  --preview-width 640
+
+Results:
+
+| Case | Wall | User CPU | Sys CPU | CPU/wall | Max RSS | Output | Commands | Raw SHA-256 |
+|---|---:|---:|---:|---:|---:|---:|---:|---|
+| Go API | 20.572s | 22.97s | 920ms | 1.16x | 256.3 MiB | 7.1 MiB | 1 | `82b923491cc19ed65ec25d0560c80a176e8145842e8988cc876e92c8b4a1d9ce` |
+| FFmpeg 8.1 CLI | 12.776s | 48.82s | 6.77s | 4.35x | 355.2 MiB | 7.1 MiB | 13 | `82b923491cc19ed65ec25d0560c80a176e8145842e8988cc876e92c8b4a1d9ce` |
+
+Decoded-frame parity: PASS.
+Decoded byte count: 258163200 for both outputs.
+
+Interpretation:
+
+- FFmpeg 8.1 CLI is faster on wall time for this sample.
+- The Go API uses less peak RSS in this run.
+- FFmpeg CLI uses more CPU because its final filter/x264 stage spreads work across many threads.
+- The Go API now matches the FFmpeg CLI reference at decoded raw-frame SHA-256 level.
