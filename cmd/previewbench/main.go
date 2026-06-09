@@ -17,7 +17,7 @@ import (
 	"syscall"
 	"time"
 
-	previewer "media-previewer"
+	previewer "go-vidthumb"
 
 	"github.com/spf13/pflag"
 )
@@ -73,7 +73,7 @@ func runBench(args []string) error {
 	version := fs.BoolP("version", "v", false, "print version and exit")
 
 	fs.Usage = func() {
-		fmt.Fprintf(fs.Output(), "Benchmark media-previewer Go API against a real FFmpeg CLI reference.\n\n")
+		fmt.Fprintf(fs.Output(), "Benchmark go-vidthumb Go API against a real FFmpeg CLI reference.\n\n")
 		fmt.Fprintf(fs.Output(), "The two paths are run sequentially, not at the same time, so each gets the full machine.\n\n")
 		fmt.Fprintf(fs.Output(), "Usage:\n  %s --input video.mp4 --ffmpeg /path/to/ffmpeg --out bench-out [flags]\n\n", os.Args[0])
 		fs.PrintDefaults()

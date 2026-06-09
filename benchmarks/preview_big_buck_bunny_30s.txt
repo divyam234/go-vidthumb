@@ -11,7 +11,7 @@ Resource benchmark command:
 
 go run ./cmd/previewbench \
   --input /mnt/data/big-buck-bunny-1080p-30sec.mp4 \
-  --out /mnt/data/go-media-previewer-matchbench-output \
+  --out /mnt/data/go-vidthumb-matchbench-output \
   --ffmpeg /mnt/data/ffmpeg-8.1/bin/ffmpeg \
   --workers 4 \
   --preview-slices 12 \

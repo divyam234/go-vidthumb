@@ -1,6 +1,6 @@
-# Go Media Previewer
+# Go VidThumb
 
-Go library + CLI for generating media preview assets with FFmpeg **shared libraries** through cgo.
+Go library + CLI for generating media preview assets and thumbnails with FFmpeg **shared libraries** through cgo.
 
 The runtime code does **not** shell out to `ffmpeg` or `ffprobe`. FFmpeg CLI is used only in one regression test as a reference implementation.
 
@@ -114,7 +114,7 @@ import (
     "context"
     "fmt"
 
-    previewer "media-previewer"
+    previewer "go-vidthumb"
 )
 
 func main() {
@@ -321,7 +321,7 @@ For wall time, CPU time, max RSS, output size, and decoded-frame hash reporting,
 ```bash
 go run ./cmd/previewbench \
   --input /mnt/data/big-buck-bunny-1080p-30sec.mp4 \
-  --out /mnt/data/go-media-previewer-matchbench-output \
+  --out /mnt/data/go-vidthumb-matchbench-output \
   --ffmpeg /mnt/data/ffmpeg-8.1/bin/ffmpeg \
   --workers 4 \
   --preview-slices 12 \
@@ -448,13 +448,13 @@ The cgo layer keeps FFmpeg ownership explicit:
 The current module path is:
 
 ```go
-module media-previewer
+module go-vidthumb
 ```
 
 Before publishing publicly, change it to your repository path, for example:
 
 ```go
-module github.com/yourname/media-previewer
+module github.com/yourname/go-vidthumb
 ```
 
 Then update imports in examples and downstream apps.

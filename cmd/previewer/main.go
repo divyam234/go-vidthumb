@@ -8,7 +8,7 @@ import (
 	"runtime"
 	"time"
 
-	previewer "media-previewer"
+	previewer "go-vidthumb"
 
 	flag "github.com/spf13/pflag"
 )

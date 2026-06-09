@@ -1,4 +1,4 @@
-module media-previewer
+module go-vidthumb
 
 go 1.23.2
 
