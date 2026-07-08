@@ -17,7 +17,7 @@ import (
 	"syscall"
 	"time"
 
-	previewer "go-vidthumb"
+	previewer "github.com/divyam234/go-vidthumb"
 
 	"github.com/spf13/pflag"
 )

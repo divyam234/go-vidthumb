@@ -114,7 +114,7 @@ import (
     "context"
     "fmt"
 
-    previewer "go-vidthumb"
+    previewer "github.com/divyam234/go-vidthumb"
 )
 
 func main() {
@@ -448,7 +448,7 @@ The cgo layer keeps FFmpeg ownership explicit:
 The current module path is:
 
 ```go
-module go-vidthumb
+module github.com/divyam234/go-vidthumb
 ```
 
 Before publishing publicly, change it to your repository path, for example:

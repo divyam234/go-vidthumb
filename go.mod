@@ -1,4 +1,4 @@
-module go-vidthumb
+module github.com/divyam234/go-vidthumb
 
 go 1.23.2
 
