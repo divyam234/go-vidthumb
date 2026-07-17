@@ -14,10 +14,13 @@ import (
 )
 
 type MediaInfo struct {
-	Duration float64
-	Width    int
-	Height   int
-	FPS      float64
+	Duration   float64
+	Width      int
+	Height     int
+	FPS        float64
+	VideoCodec string
+	AudioCodec string
+	Bitrate    int64
 }
 
 // LogLevel controls process-wide FFmpeg library logging.
@@ -62,7 +65,15 @@ func Probe(input string) (MediaInfo, error) {
 	if rc := C.pv_probe(cin, &info); rc < 0 {
 		return MediaInfo{}, fmt.Errorf("probe failed: %s", lastFFErr())
 	}
-	return MediaInfo{Duration: float64(info.duration), Width: int(info.width), Height: int(info.height), FPS: float64(info.fps)}, nil
+	return MediaInfo{
+		Duration:   float64(info.duration),
+		Width:      int(info.width),
+		Height:     int(info.height),
+		FPS:        float64(info.fps),
+		VideoCodec: C.GoString(&info.video_codec[0]),
+		AudioCodec: C.GoString(&info.audio_codec[0]),
+		Bitrate:    int64(info.bitrate),
+	}, nil
 }
 
 func openDecoder(input string) (*cDecoder, error) {

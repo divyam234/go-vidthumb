@@ -8,6 +8,9 @@ typedef struct PVInfo {
     int width;
     int height;
     double fps;
+    char video_codec[64];
+    char audio_codec[64];
+    int64_t bitrate;
 } PVInfo;
 
 typedef struct PVThumb {

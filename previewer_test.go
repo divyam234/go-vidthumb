@@ -25,6 +25,19 @@ func testInputPath(t *testing.T) string {
 	return path
 }
 
+func TestProbeReturnsCodecAndBitrate(t *testing.T) {
+	info, err := ProbeFile(context.Background(), testInputPath(t))
+	if err != nil {
+		t.Fatalf("probe: %v", err)
+	}
+	if info.VideoCodec != "h264" {
+		t.Fatalf("video codec = %q, want h264", info.VideoCodec)
+	}
+	if info.Bitrate <= 0 {
+		t.Fatalf("bitrate = %d, want positive value", info.Bitrate)
+	}
+}
+
 func externalInputPath(t *testing.T) string {
 	t.Helper()
 	path := os.Getenv("PREVIEWER_TEST_INPUT")

@@ -122,6 +122,23 @@ int pv_probe(const char *input_path, PVInfo *info) {
     info->width = st->codecpar->width;
     info->height = st->codecpar->height;
     info->fps = stream_fps(st);
+    snprintf(info->video_codec, sizeof(info->video_codec), "%s", avcodec_get_name(st->codecpar->codec_id));
+
+    int audio_idx = av_find_best_stream(fmt, AVMEDIA_TYPE_AUDIO, -1, -1, NULL, 0);
+    if (audio_idx >= 0) {
+        AVStream *audio = fmt->streams[audio_idx];
+        snprintf(info->audio_codec, sizeof(info->audio_codec), "%s", avcodec_get_name(audio->codecpar->codec_id));
+    }
+
+    info->bitrate = fmt->bit_rate;
+    if (info->bitrate <= 0) {
+        info->bitrate = 0;
+        for (unsigned int i = 0; i < fmt->nb_streams; i++) {
+            if (fmt->streams[i]->codecpar->bit_rate > 0) {
+                info->bitrate += fmt->streams[i]->codecpar->bit_rate;
+            }
+        }
+    }
 
     avformat_close_input(&fmt);
     return 0;
