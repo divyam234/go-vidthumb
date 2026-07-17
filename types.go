@@ -39,6 +39,9 @@ type SpriteOptions struct {
 	Rows        int
 	ThumbWidth  int
 	JPEGQuality int
+	// OffsetSeconds excludes this duration from each edge when selecting frames.
+	// VTT cues still span the complete media duration.
+	OffsetSeconds float64
 }
 
 type PreviewOptions struct {
@@ -47,6 +50,8 @@ type PreviewOptions struct {
 	SliceSeconds float64
 	Width        int
 	KeepParts    bool
+	// OffsetSeconds excludes this duration from each edge when distributing slices.
+	OffsetSeconds float64
 }
 
 // PHashOptions controls perceptual hash generation. It samples frames using the

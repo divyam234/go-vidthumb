@@ -32,6 +32,11 @@ The public API is intentionally split into independent pieces:
 
 pHash is **not** exposed in the CLI and is not coupled to preview/sprite generation. It reuses the thumbnail extraction pipeline with pHash-specific options.
 
+`SpriteOptions.OffsetSeconds` and `PreviewOptions.OffsetSeconds` exclude a
+duration from both media edges when selecting frames and preview slices. The
+effective offset is clamped for short media. Sprite VTT cues continue to cover
+the complete media duration, so timeline scrubbing has no gaps.
+
 ## FFmpeg dependency
 
 You need FFmpeg shared libraries and headers discoverable by `pkg-config`:

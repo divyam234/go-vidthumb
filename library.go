@@ -308,11 +308,13 @@ func copyPreviewSlicesFromPath(ctx context.Context, input, partsDir string, info
 	}
 
 	jobs := make([]previewJob, opts.Slices)
-	maxStart := math.Max(0, info.Duration-sliceSeconds)
+	offset := effectiveEdgeOffset(info.Duration, sliceSeconds, opts.OffsetSeconds)
+	minStart := offset
+	maxStart := math.Max(minStart, info.Duration-offset-sliceSeconds)
 	for i := 0; i < opts.Slices; i++ {
-		start := 0.0
+		start := minStart
 		if opts.Slices > 1 {
-			start = (float64(i) / float64(opts.Slices-1)) * maxStart
+			start += (float64(i) / float64(opts.Slices-1)) * (maxStart - minStart)
 		}
 		jobs[i] = previewJob{Index: i, Start: start, Path: filepath.Join(partsDir, fmt.Sprintf("part_%04d.mp4", i))}
 	}
@@ -448,10 +450,12 @@ func extractThumbnailsFromPath(ctx context.Context, input string, info MediaInfo
 
 	jobs := make([]thumbJob, total)
 	interval := info.Duration / float64(total)
+	offset := effectiveEdgeOffset(info.Duration, 0.1, opts.OffsetSeconds)
+	sampleRange := math.Max(0, info.Duration-2*offset)
 	for i := 0; i < total; i++ {
 		st := float64(i) * interval
 		en := float64(i+1) * interval
-		at := st + interval*0.5
+		at := offset + (float64(i)+0.5)*sampleRange/float64(total)
 		at = math.Max(0.05, math.Min(at, info.Duration-0.05))
 		jobs[i] = thumbJob{Index: i, At: at, Start: st, End: en}
 	}
@@ -529,6 +533,13 @@ func extractThumbnailsFromPath(ctx context.Context, input string, info MediaInfo
 
 	sort.Slice(thumbs, func(i, j int) bool { return thumbs[i].Index < thumbs[j].Index })
 	return thumbs, nil
+}
+
+func effectiveEdgeOffset(duration, requiredSpan, requested float64) float64 {
+	if requested <= 0 || duration <= requiredSpan {
+		return 0
+	}
+	return math.Min(requested, (duration-requiredSpan)/2)
 }
 
 func WriteSpriteJPEG(path string, thumbs []Thumb, cols int, quality int) error {

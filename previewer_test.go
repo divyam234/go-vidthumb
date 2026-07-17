@@ -167,6 +167,38 @@ func TestPreviewSlicesFromFileAndReadSeekerMatchExactly(t *testing.T) {
 	}
 }
 
+func TestPreviewSlicesRespectEdgeOffset(t *testing.T) {
+	input := filepath.Join("testdata", "sample.mp4")
+	parts, info, err := CopyPreviewSlices(context.Background(), FromFile(input), t.TempDir(), PreviewOptions{
+		Slices: 3, SliceSeconds: 0.5, OffsetSeconds: 1,
+	}, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if parts[0].Start < 1 {
+		t.Fatalf("first preview start = %f, want >= 1", parts[0].Start)
+	}
+	if last := parts[len(parts)-1]; last.Start+last.Duration > info.Duration-1+0.001 {
+		t.Fatalf("last preview ends at %f, want <= %f", last.Start+last.Duration, info.Duration-1)
+	}
+}
+
+func TestThumbnailOffsetPreservesTimelineCues(t *testing.T) {
+	input := filepath.Join("testdata", "sample.mp4")
+	thumbs, info, err := ExtractThumbnailsFromFile(context.Background(), input, SpriteOptions{
+		Columns: 2, Rows: 2, ThumbWidth: 96, OffsetSeconds: 1,
+	}, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if thumbs[0].Start != 0 {
+		t.Fatalf("first cue starts at %f, want 0", thumbs[0].Start)
+	}
+	if got := thumbs[len(thumbs)-1].End; math.Abs(got-info.Duration) > 0.001 {
+		t.Fatalf("last cue ends at %f, want %f", got, info.Duration)
+	}
+}
+
 func TestGeneratePreviewWithRelativeOutputDirDoesNotDuplicatePartsPath(t *testing.T) {
 	input, err := filepath.Abs(testInputPath(t))
 	if err != nil {
