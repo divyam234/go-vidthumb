@@ -60,6 +60,18 @@ Or build through the helper script:
 FFMPEG_PREFIX=/mnt/data/ffmpeg-8.1 ./build.sh
 ```
 
+## FFmpeg logging
+
+FFmpeg library logging defaults to `previewer.LogLevelError`. The level is
+process-wide and can be changed before or during media processing:
+
+```go
+previewer.SetLogLevel(previewer.LogLevelFatal)
+```
+
+Available levels are `Quiet`, `Panic`, `Fatal`, `Error`, `Warning`, `Info`,
+`Verbose`, `Debug`, and `Trace`, each prefixed with `LogLevel`.
+
 ## CLI usage
 
 Build:

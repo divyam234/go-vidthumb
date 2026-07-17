@@ -32,6 +32,16 @@ static void pv_ffmpeg_init(void) {
     pthread_once(&g_ffmpeg_init_once, pv_ffmpeg_init_once);
 }
 
+void pv_set_log_level(int level) {
+    pv_ffmpeg_init();
+    av_log_set_level(level);
+}
+
+int pv_get_log_level(void) {
+    pv_ffmpeg_init();
+    return av_log_get_level();
+}
+
 static void set_error(const char *fmt, ...) {
     va_list ap;
     va_start(ap, fmt);

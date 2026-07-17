@@ -26,6 +26,8 @@ typedef struct PVPreviewSliceMeta {
     double copied_duration;
 } PVPreviewSliceMeta;
 
+void pv_set_log_level(int level);
+int pv_get_log_level(void);
 int pv_probe(const char *input_path, PVInfo *info);
 const char *pv_last_error(void);
 PVDecoder *pv_decoder_open(const char *input_path);

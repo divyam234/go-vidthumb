@@ -20,6 +20,31 @@ type MediaInfo struct {
 	FPS      float64
 }
 
+// LogLevel controls process-wide FFmpeg library logging.
+type LogLevel int
+
+const (
+	LogLevelQuiet   LogLevel = -8
+	LogLevelPanic   LogLevel = 0
+	LogLevelFatal   LogLevel = 8
+	LogLevelError   LogLevel = 16
+	LogLevelWarning LogLevel = 24
+	LogLevelInfo    LogLevel = 32
+	LogLevelVerbose LogLevel = 40
+	LogLevelDebug   LogLevel = 48
+	LogLevelTrace   LogLevel = 56
+)
+
+// SetLogLevel sets the process-wide FFmpeg log level. The default is LogLevelError.
+func SetLogLevel(level LogLevel) {
+	C.pv_set_log_level(C.int(level))
+}
+
+// CurrentLogLevel returns the process-wide FFmpeg log level.
+func CurrentLogLevel() LogLevel {
+	return LogLevel(C.pv_get_log_level())
+}
+
 type cDecoder struct{ ptr *C.PVDecoder }
 
 func lastFFErr() string {
