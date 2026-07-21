@@ -45,21 +45,27 @@ func applyPHashDefaults(opts *PHashOptions) {
 	}
 }
 
-// CalculatePHash samples video frames using the same seek-grid behavior as
-// sprite generation, builds an in-memory montage, and calculates a perceptual
-// hash from that montage. It is intentionally API-only and is not coupled to
-// the CLI or Generate pipeline.
+// CalculatePHash samples a Columns x Rows grid across the middle 90% of the
+// video, builds a montage, and computes the standard 64-bit DCT pHash from the
+// full montage.
 func CalculatePHash(ctx context.Context, src Source, opts PHashOptions, workers int) (*PHashResult, MediaInfo, error) {
 	if workers <= 0 {
 		workers = 1
 	}
 	applyPHashDefaults(&opts)
 
-	thumbs, info, err := ExtractThumbnails(ctx, src, SpriteOptions{
-		Columns:    opts.Columns,
-		Rows:       opts.Rows,
-		ThumbWidth: opts.ThumbWidth,
-	}, workers)
+	prepared, err := prepareSource(ctx, src)
+	if err != nil {
+		return nil, MediaInfo{}, err
+	}
+	if prepared.cleanup != nil {
+		defer prepared.cleanup()
+	}
+	info, err := Probe(prepared.path)
+	if err != nil {
+		return nil, MediaInfo{}, err
+	}
+	thumbs, err := extractPHashThumbnailsFromPath(ctx, prepared.path, info, opts, workers)
 	if err != nil {
 		return nil, info, err
 	}
@@ -70,10 +76,37 @@ func CalculatePHash(ctx context.Context, src Source, opts PHashOptions, workers 
 	return &PHashResult{Hash: hash, Hex: FormatPHash(hash), Thumbs: thumbs}, info, nil
 }
 
+func extractPHashThumbnailsFromPath(ctx context.Context, input string, info MediaInfo, opts PHashOptions, workers int) ([]Thumb, error) {
+	total := opts.Columns * opts.Rows
+	if total <= 0 {
+		return nil, errors.New("phash columns and rows must be positive")
+	}
+	if info.Duration <= 0 {
+		return nil, errors.New("input duration is unknown; cannot distribute phash timestamps")
+	}
+
+	// Start at 5% and take evenly spaced samples across the middle 90%. For a
+	// 5x5 grid, the last sample is at 91.4% rather than at the center of the
+	// final segment.
+	offset := 0.05 * info.Duration
+	step := 0.9 * info.Duration / float64(total)
+	interval := info.Duration / float64(total)
+	jobs := make([]thumbJob, total)
+	for i := range jobs {
+		jobs[i] = thumbJob{
+			Index:   i,
+			At:      offset + float64(i)*step,
+			Start:   float64(i) * interval,
+			End:     float64(i+1) * interval,
+			Bicubic: true,
+		}
+	}
+	return extractThumbnailJobs(ctx, input, jobs, opts.ThumbWidth, workers, nil)
+}
+
 // ComputePHashFromThumbnails calculates pHash from already extracted
-// thumbnails. This is useful when callers already called ExtractThumbnails and
-// want to avoid seeking/decoding twice. The implementation uses goimagehash for
-// the DCT pHash and imaging for the final resize/normalization step.
+// thumbnails. To match CalculatePHash, the thumbnails must use the same
+// 5%-to-95% sampling grid.
 func ComputePHashFromThumbnails(thumbs []Thumb, opts PHashOptions) (uint64, error) {
 	if len(thumbs) == 0 {
 		return 0, errors.New("no thumbnails")
@@ -92,28 +125,24 @@ func computePHashImageHash(img image.Image, opts PHashOptions) (uint64, error) {
 	}
 	applyPHashDefaults(&opts)
 
-	// Keep this normalization explicit so callers can still tune options without
-	// depending on goimagehash internals. goimagehash's normal 64-bit pHash path
-	// does its own 64x64 resize; pre-resizing here is mostly useful for reducing
-	// large montage cost and making the public options meaningful.
-	resizeSize := opts.ResizeSize
-	if resizeSize < 8 {
-		resizeSize = 8
-	}
-	normalized := imaging.Resize(img, resizeSize, resizeSize, imaging.Linear)
-
-	// Stash-style 64-bit pHash is the main API. goimagehash.PerceptionHash gives
-	// that directly. For custom HashSize values that are powers of two when
-	// squared, use goimagehash's extended hash and fold the words to a stable
-	// uint64 so the existing PHashResult API remains backwards-compatible.
+	// Pass the full montage directly to PerceptionHash. That function performs
+	// its own 64x64 bilinear normalization before grayscale conversion and DCT;
+	// pre-resizing here changes the resulting fingerprint.
 	if opts.HashSize == 8 {
-		h, err := goimagehash.PerceptionHash(normalized)
+		h, err := goimagehash.PerceptionHash(img)
 		if err != nil {
 			return 0, err
 		}
 		return h.GetHash(), nil
 	}
 
+	// ResizeSize is retained for the non-standard extended-hash API. It is
+	// intentionally ignored by the standard 64-bit path above.
+	resizeSize := opts.ResizeSize
+	if resizeSize < 8 {
+		resizeSize = 8
+	}
+	normalized := imaging.Resize(img, resizeSize, resizeSize, imaging.Linear)
 	ext, err := goimagehash.ExtPerceptionHash(normalized, opts.HashSize, opts.HashSize)
 	if err != nil {
 		return 0, err
@@ -230,8 +259,8 @@ func readAllSeekStart(r io.ReadSeeker) ([]byte, error) {
 }
 
 // PHashHexFromGoImageHashString accepts goimagehash strings such as
-// "p:0123..." and returns only the hex payload. It is handy for callers moving
-// between this package's Stash-style hex and goimagehash serialization.
+// "p:0123..." and returns only the hex payload. It is handy when moving
+// between this package's hex format and goimagehash serialization.
 func PHashHexFromGoImageHashString(s string) string {
 	if i := strings.IndexByte(s, ':'); i >= 0 {
 		return s[i+1:]

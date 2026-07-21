@@ -17,10 +17,11 @@ import (
 )
 
 type thumbJob struct {
-	Index int
-	At    float64
-	Start float64
-	End   float64
+	Index   int
+	At      float64
+	Start   float64
+	End     float64
+	Bicubic bool
 }
 
 type thumbResult struct {
@@ -440,9 +441,6 @@ func extractThumbnailsFromPath(ctx context.Context, input string, info MediaInfo
 	if opts.ThumbWidth <= 0 {
 		opts.ThumbWidth = 160
 	}
-	if workers <= 0 {
-		workers = 1
-	}
 	total := opts.Columns * opts.Rows
 	if info.Duration <= 0 {
 		return nil, errors.New("input duration is unknown; cannot distribute sprite timestamps")
@@ -460,6 +458,17 @@ func extractThumbnailsFromPath(ctx context.Context, input string, info MediaInfo
 		jobs[i] = thumbJob{Index: i, At: at, Start: st, End: en}
 	}
 
+	return extractThumbnailJobs(ctx, input, jobs, opts.ThumbWidth, workers, progress)
+}
+
+func extractThumbnailJobs(ctx context.Context, input string, jobs []thumbJob, thumbWidth, workers int, progress func(ProgressEvent)) ([]Thumb, error) {
+	total := len(jobs)
+	if total == 0 {
+		return nil, errors.New("no thumbnail jobs")
+	}
+	if thumbWidth <= 0 {
+		return nil, errors.New("thumbnail width must be positive")
+	}
 	if workers > total {
 		workers = total
 	}
@@ -490,7 +499,13 @@ func extractThumbnailsFromPath(ctx context.Context, input string, info MediaInfo
 					resCh <- thumbResult{Err: err}
 					continue
 				}
-				th, err := dec.SeekThumbnail(j.At, opts.ThumbWidth)
+				var th Thumb
+				var err error
+				if j.Bicubic {
+					th, err = dec.SeekThumbnailBicubic(j.At, thumbWidth)
+				} else {
+					th, err = dec.SeekThumbnail(j.At, thumbWidth)
+				}
 				if err != nil {
 					resCh <- thumbResult{Err: fmt.Errorf("worker %d index %d: %w", id, j.Index, err)}
 					continue

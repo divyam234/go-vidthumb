@@ -259,7 +259,10 @@ Sprite generation:
 
 ## pHash API
 
-pHash is API-only and independent from CLI output generation.
+pHash is API-only and independent from CLI output generation. The standard
+`5x5`, `160px`, 64-bit configuration uses a deterministic video pHash pipeline:
+25 frames are sampled from 5% through 91.4% of the duration, combined into one
+montage, and passed directly to `goimagehash.PerceptionHash`.
 
 ```go
 ph, info, err := previewer.CalculatePHashFromFile(
@@ -269,7 +272,6 @@ ph, info, err := previewer.CalculatePHashFromFile(
         Columns:    5,
         Rows:       5,
         ThumbWidth: 160,
-        ResizeSize: 32,
         HashSize:   8,
     },
     4,
@@ -279,14 +281,14 @@ _ = err
 fmt.Println(ph.Hex)
 ```
 
-If thumbnails are already available, avoid a second decode pass:
+If pHash thumbnails sampled with the same grid are already available, avoid a
+second decode pass:
 
 ```go
 hash, err := previewer.ComputePHashFromThumbnails(thumbs, previewer.PHashOptions{
     Columns:    5,
     Rows:       5,
     ThumbWidth: 160,
-    ResizeSize: 32,
     HashSize:   8,
 })
 if err != nil {
@@ -295,7 +297,9 @@ if err != nil {
 fmt.Println(previewer.FormatPHash(hash))
 ```
 
-
+`ResizeSize` applies only to non-standard extended hashes. It is ignored for
+the standard 64-bit path because `goimagehash.PerceptionHash` normalizes the
+full montage internally.
 ## Benchmarks: Go API vs FFmpeg 8.1 CLI
 
 Two benchmark styles are included.

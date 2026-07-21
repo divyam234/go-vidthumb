@@ -54,13 +54,15 @@ type PreviewOptions struct {
 	OffsetSeconds float64
 }
 
-// PHashOptions controls perceptual hash generation. It samples frames using the
-// same seek-based grid logic as SpriteOptions, builds an in-memory montage, then
-// calculates a DCT pHash from that montage.
+// PHashOptions controls perceptual hash generation. The standard 64-bit path
+// samples frames across the middle 90% of the video, combines them into a
+// montage, and passes it directly to the DCT pHash implementation.
 type PHashOptions struct {
 	Columns    int
 	Rows       int
 	ThumbWidth int
+	// ResizeSize applies only to non-standard extended hashes. The standard
+	// 64-bit hash ignores it because goimagehash performs its own 64x64 resize.
 	ResizeSize int
 	HashSize   int
 }

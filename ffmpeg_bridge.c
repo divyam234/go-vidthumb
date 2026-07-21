@@ -198,7 +198,7 @@ void pv_decoder_close(PVDecoder *d) {
     free(d);
 }
 
-static int scale_frame_to_rgba(PVDecoder *d, AVFrame *src, int target_width, PVThumb *out) {
+static int scale_frame_to_rgba(PVDecoder *d, AVFrame *src, int target_width, int sws_flags, int force_even_height, PVThumb *out) {
     if (!d || !src || !out) return AVERROR(EINVAL);
     memset(out, 0, sizeof(*out));
 
@@ -210,14 +210,15 @@ static int scale_frame_to_rgba(PVDecoder *d, AVFrame *src, int target_width, PVT
     }
     if (target_width <= 0) target_width = 160;
     int dst_w = target_width;
-    int dst_h = (int)lrint((double)src_h * (double)dst_w / (double)src_w);
-    if (dst_h <= 0) dst_h = 1;
+    double scaled_height = (double)src_h * (double)dst_w / (double)src_w;
+    int dst_h = force_even_height ? (int)lrint(scaled_height / 2.0) * 2 : (int)lrint(scaled_height);
+    if (dst_h <= 0) dst_h = force_even_height ? 2 : 1;
 
     d->sws = sws_getCachedContext(
         d->sws,
         src_w, src_h, (enum AVPixelFormat)src->format,
         dst_w, dst_h, AV_PIX_FMT_RGBA,
-        SWS_FAST_BILINEAR,
+        sws_flags,
         NULL, NULL, NULL
     );
     if (!d->sws) {
@@ -245,7 +246,7 @@ static int scale_frame_to_rgba(PVDecoder *d, AVFrame *src, int target_width, PVT
     return 0;
 }
 
-int pv_seek_thumbnail(PVDecoder *d, double seconds, int target_width, PVThumb *out) {
+static int pv_seek_thumbnail_with_flags(PVDecoder *d, double seconds, int target_width, int sws_flags, int force_even_height, PVThumb *out) {
     if (!d || !out) {
         set_error("pv_seek_thumbnail: nil decoder/out");
         return AVERROR(EINVAL);
@@ -286,7 +287,7 @@ int pv_seek_thumbnail(PVDecoder *d, double seconds, int target_width, PVThumb *o
         while ((ret = avcodec_receive_frame(d->dec, d->frame)) >= 0) {
             int64_t pts = d->frame->best_effort_timestamp;
             if (pts == AV_NOPTS_VALUE || pts >= target_ts) {
-                int sr = scale_frame_to_rgba(d, d->frame, target_width, out);
+                int sr = scale_frame_to_rgba(d, d->frame, target_width, sws_flags, force_even_height, out);
                 av_frame_unref(d->frame);
                 av_frame_free(&fallback);
                 return sr;
@@ -308,7 +309,7 @@ int pv_seek_thumbnail(PVDecoder *d, double seconds, int target_width, PVThumb *o
     }
 
     if (fallback) {
-        int sr = scale_frame_to_rgba(d, fallback, target_width, out);
+        int sr = scale_frame_to_rgba(d, fallback, target_width, sws_flags, force_even_height, out);
         av_frame_free(&fallback);
         return sr;
     }
@@ -322,6 +323,14 @@ fail:
     av_packet_unref(d->pkt);
     av_frame_unref(d->frame);
     return ret < 0 ? ret : AVERROR(EINVAL);
+}
+
+int pv_seek_thumbnail(PVDecoder *d, double seconds, int target_width, PVThumb *out) {
+    return pv_seek_thumbnail_with_flags(d, seconds, target_width, SWS_FAST_BILINEAR, 0, out);
+}
+
+int pv_seek_thumbnail_bicubic(PVDecoder *d, double seconds, int target_width, PVThumb *out) {
+    return pv_seek_thumbnail_with_flags(d, seconds, target_width, SWS_BICUBIC, 1, out);
 }
 
 void pv_thumb_free(PVThumb *t) {

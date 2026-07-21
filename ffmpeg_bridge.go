@@ -103,8 +103,21 @@ type Thumb struct {
 }
 
 func (d *cDecoder) SeekThumbnail(seconds float64, targetWidth int) (Thumb, error) {
+	return d.seekThumbnail(seconds, targetWidth, false)
+}
+
+func (d *cDecoder) SeekThumbnailBicubic(seconds float64, targetWidth int) (Thumb, error) {
+	return d.seekThumbnail(seconds, targetWidth, true)
+}
+
+func (d *cDecoder) seekThumbnail(seconds float64, targetWidth int, bicubic bool) (Thumb, error) {
 	var out C.PVThumb
-	rc := C.pv_seek_thumbnail(d.ptr, C.double(seconds), C.int(targetWidth), &out)
+	var rc C.int
+	if bicubic {
+		rc = C.pv_seek_thumbnail_bicubic(d.ptr, C.double(seconds), C.int(targetWidth), &out)
+	} else {
+		rc = C.pv_seek_thumbnail(d.ptr, C.double(seconds), C.int(targetWidth), &out)
+	}
 	if rc < 0 {
 		return Thumb{}, fmt.Errorf("seek thumbnail %.3fs failed: %s", seconds, lastFFErr())
 	}

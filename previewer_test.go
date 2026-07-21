@@ -125,18 +125,47 @@ func TestAAAPHashFromFileAndReadSeekerMatchExactly(t *testing.T) {
 	}
 }
 
-func TestAABComputePHashFromExtractedThumbnailsMatchesCalculatePHash(t *testing.T) {
+func TestAABPHashMatchesGoldenReference(t *testing.T) {
+	input := testInputPath(t)
+	opts := PHashOptions{Columns: 5, Rows: 5, ThumbWidth: 160, ResizeSize: 32, HashSize: 8}
+	const want = "8a7ff5009a2aea6a"
+
+	var ph *PHashResult
+	for _, workers := range []int{1, 4, 25} {
+		got, _, err := CalculatePHashFromFile(context.Background(), input, opts, workers)
+		if err != nil {
+			t.Fatalf("calculate phash with %d workers: %v", workers, err)
+		}
+		if got.Hex != want {
+			t.Fatalf("golden phash with %d workers=%s, want %s", workers, got.Hex, want)
+		}
+		if ph == nil {
+			ph = got
+		} else if got.Hash != ph.Hash {
+			t.Fatalf("worker count changed phash: %s != %s", got.Hex, ph.Hex)
+		}
+	}
+
+	// The standard path passes the full montage directly to PerceptionHash, so
+	// ResizeSize is intentionally ignored.
+	opts.ResizeSize = 512
+	got, err := ComputePHashFromThumbnails(ph.Thumbs, opts)
+	if err != nil {
+		t.Fatalf("recompute phash: %v", err)
+	}
+	if got != ph.Hash {
+		t.Fatalf("ResizeSize changed standard phash: %s != %s", FormatPHash(got), ph.Hex)
+	}
+}
+
+func TestAACComputePHashFromPHashThumbnailsMatchesCalculatePHash(t *testing.T) {
 	input := testInputPath(t)
 	opts := PHashOptions{Columns: 2, Rows: 2, ThumbWidth: 96, ResizeSize: 32, HashSize: 8}
 	ph, _, err := CalculatePHashFromFile(context.Background(), input, opts, 1)
 	if err != nil {
 		t.Fatalf("calculate phash: %v", err)
 	}
-	thumbs, _, err := ExtractThumbnailsFromFile(context.Background(), input, SpriteOptions{Enabled: true, Columns: opts.Columns, Rows: opts.Rows, ThumbWidth: opts.ThumbWidth}, 1)
-	if err != nil {
-		t.Fatalf("extract thumbs: %v", err)
-	}
-	got, err := ComputePHashFromThumbnails(thumbs, opts)
+	got, err := ComputePHashFromThumbnails(ph.Thumbs, opts)
 	if err != nil {
 		t.Fatalf("compute phash from thumbs: %v", err)
 	}
