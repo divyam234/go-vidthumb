@@ -103,17 +103,31 @@ type Thumb struct {
 }
 
 func (d *cDecoder) SeekThumbnail(seconds float64, targetWidth int) (Thumb, error) {
-	return d.seekThumbnail(seconds, targetWidth, false)
+	return d.seekThumbnail(seconds, targetWidth, false, false)
 }
 
 func (d *cDecoder) SeekThumbnailBicubic(seconds float64, targetWidth int) (Thumb, error) {
-	return d.seekThumbnail(seconds, targetWidth, true)
+	return d.seekThumbnail(seconds, targetWidth, true, false)
 }
 
-func (d *cDecoder) seekThumbnail(seconds float64, targetWidth int, bicubic bool) (Thumb, error) {
+func (d *cDecoder) SeekThumbnailFast(seconds float64, targetWidth int) (Thumb, error) {
+	return d.seekThumbnail(seconds, targetWidth, false, true)
+}
+
+func (d *cDecoder) SeekThumbnailFastBicubic(seconds float64, targetWidth int) (Thumb, error) {
+	return d.seekThumbnail(seconds, targetWidth, true, true)
+}
+
+func (d *cDecoder) seekThumbnail(seconds float64, targetWidth int, bicubic, fast bool) (Thumb, error) {
 	var out C.PVThumb
 	var rc C.int
-	if bicubic {
+	if fast {
+		if bicubic {
+			rc = C.pv_seek_thumbnail_fast_bicubic(d.ptr, C.double(seconds), C.int(targetWidth), &out)
+		} else {
+			rc = C.pv_seek_thumbnail_fast(d.ptr, C.double(seconds), C.int(targetWidth), &out)
+		}
+	} else if bicubic {
 		rc = C.pv_seek_thumbnail_bicubic(d.ptr, C.double(seconds), C.int(targetWidth), &out)
 	} else {
 		rc = C.pv_seek_thumbnail(d.ptr, C.double(seconds), C.int(targetWidth), &out)
@@ -170,6 +184,17 @@ func CopyVideoSliceDetailed(input, output string, startSeconds, sliceSeconds flo
 		Outpoint:       float64(meta.outpoint),
 		CopiedDuration: float64(meta.copied_duration),
 	}, nil
+}
+
+func TranscodeVideoSlice(input, output string, startSeconds, durationSeconds float64, targetWidth int, targetFPS float64) error {
+	cin := C.CString(input)
+	cout := C.CString(output)
+	defer C.free(unsafe.Pointer(cin))
+	defer C.free(unsafe.Pointer(cout))
+	if rc := C.pv_transcode_video_slice(cin, cout, C.double(startSeconds), C.double(durationSeconds), C.int(targetWidth), C.double(targetFPS)); rc < 0 {
+		return fmt.Errorf("transcode preview slice %.3fs+%.3fs failed: %s", startSeconds, durationSeconds, lastFFErr())
+	}
+	return nil
 }
 
 func ConcatVideoSegments(listPath, output string) error {

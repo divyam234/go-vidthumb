@@ -39,6 +39,9 @@ type SpriteOptions struct {
 	Rows        int
 	ThumbWidth  int
 	JPEGQuality int
+	// FastSeek uses the first decodable frame at or before each requested
+	// timestamp instead of decoding forward to the exact timestamp.
+	FastSeek bool
 	// OffsetSeconds excludes this duration from each edge when selecting frames.
 	// VTT cues still span the complete media duration.
 	OffsetSeconds float64
@@ -49,7 +52,9 @@ type PreviewOptions struct {
 	Slices       int
 	SliceSeconds float64
 	Width        int
-	KeepParts    bool
+	// FPS controls preview output frame rate. Zero preserves source FPS.
+	FPS       float64
+	KeepParts bool
 	// OffsetSeconds excludes this duration from each edge when distributing slices.
 	OffsetSeconds float64
 }

@@ -246,7 +246,7 @@ static int scale_frame_to_rgba(PVDecoder *d, AVFrame *src, int target_width, int
     return 0;
 }
 
-static int pv_seek_thumbnail_with_flags(PVDecoder *d, double seconds, int target_width, int sws_flags, int force_even_height, PVThumb *out) {
+static int pv_seek_thumbnail_with_flags(PVDecoder *d, double seconds, int target_width, int sws_flags, int force_even_height, int exact, PVThumb *out) {
     if (!d || !out) {
         set_error("pv_seek_thumbnail: nil decoder/out");
         return AVERROR(EINVAL);
@@ -286,7 +286,7 @@ static int pv_seek_thumbnail_with_flags(PVDecoder *d, double seconds, int target
 
         while ((ret = avcodec_receive_frame(d->dec, d->frame)) >= 0) {
             int64_t pts = d->frame->best_effort_timestamp;
-            if (pts == AV_NOPTS_VALUE || pts >= target_ts) {
+            if (!exact || pts == AV_NOPTS_VALUE || pts >= target_ts) {
                 int sr = scale_frame_to_rgba(d, d->frame, target_width, sws_flags, force_even_height, out);
                 av_frame_unref(d->frame);
                 av_frame_free(&fallback);
@@ -326,11 +326,19 @@ fail:
 }
 
 int pv_seek_thumbnail(PVDecoder *d, double seconds, int target_width, PVThumb *out) {
-    return pv_seek_thumbnail_with_flags(d, seconds, target_width, SWS_FAST_BILINEAR, 0, out);
+    return pv_seek_thumbnail_with_flags(d, seconds, target_width, SWS_FAST_BILINEAR, 0, 1, out);
 }
 
 int pv_seek_thumbnail_bicubic(PVDecoder *d, double seconds, int target_width, PVThumb *out) {
-    return pv_seek_thumbnail_with_flags(d, seconds, target_width, SWS_BICUBIC, 1, out);
+    return pv_seek_thumbnail_with_flags(d, seconds, target_width, SWS_BICUBIC, 1, 1, out);
+}
+
+int pv_seek_thumbnail_fast(PVDecoder *d, double seconds, int target_width, PVThumb *out) {
+    return pv_seek_thumbnail_with_flags(d, seconds, target_width, SWS_FAST_BILINEAR, 0, 0, out);
+}
+
+int pv_seek_thumbnail_fast_bicubic(PVDecoder *d, double seconds, int target_width, PVThumb *out) {
+    return pv_seek_thumbnail_with_flags(d, seconds, target_width, SWS_BICUBIC, 1, 0, out);
 }
 
 void pv_thumb_free(PVThumb *t) {
@@ -696,7 +704,7 @@ static int init_video_filter(
 
 
     if (target_width > 0) {
-        snprintf(filter_descr, sizeof(filter_descr), "scale=%d:-2:flags=fast_bilinear,fps=%d/%d,format=yuv420p", target_width, fps.num, fps.den);
+        snprintf(filter_descr, sizeof(filter_descr), "fps=%d/%d,scale=%d:-2:flags=fast_bilinear,format=yuv420p", fps.num, fps.den, target_width);
     } else {
         snprintf(filter_descr, sizeof(filter_descr), "fps=%d/%d,format=yuv420p", fps.num, fps.den);
     }
@@ -737,13 +745,28 @@ fail:
     return ret < 0 ? ret : AVERROR(EINVAL);
 }
 
-static int transcode_decoder_to_video(PVDecoder *dec, const char *output_path, int target_width, double target_fps) {
+static int transcode_decoder_to_video(PVDecoder *dec, const char *output_path, int target_width, double target_fps, double start_seconds, double duration_seconds) {
     if (!dec || !output_path) { set_error("transcode_decoder_to_video: nil input"); if (dec) pv_decoder_close(dec); return AVERROR(EINVAL); }
 
     double fps_d = target_fps > 1.0 && target_fps <= 120.0 ? target_fps : stream_fps(dec->stream);
     if (fps_d <= 1.0 || fps_d > 120.0) fps_d = 30.0;
     AVRational fps = av_d2q(fps_d, 1001000);
     if (fps.num <= 0 || fps.den <= 0) fps = (AVRational){30, 1};
+
+    int64_t start_ts = AV_NOPTS_VALUE;
+    int64_t end_ts = AV_NOPTS_VALUE;
+    if (start_seconds > 0.0 || duration_seconds > 0.0) {
+        if (start_seconds < 0.0) start_seconds = 0.0;
+        start_ts = av_rescale_q((int64_t)llround(start_seconds * AV_TIME_BASE), AV_TIME_BASE_Q, dec->stream->time_base);
+        if (duration_seconds > 0.0) {
+            int64_t dur_ts = av_rescale_q((int64_t)llround(duration_seconds * AV_TIME_BASE), AV_TIME_BASE_Q, dec->stream->time_base);
+            end_ts = start_ts + (dur_ts > 0 ? dur_ts : 1);
+        }
+        int ret = av_seek_frame(dec->fmt, dec->stream_index, start_ts, AVSEEK_FLAG_BACKWARD);
+        if (ret < 0) ret = avformat_seek_file(dec->fmt, dec->stream_index, INT64_MIN, start_ts, start_ts, AVSEEK_FLAG_BACKWARD);
+        if (ret < 0) { set_av_error("transcode slice seek", ret); pv_decoder_close(dec); return ret; }
+        avcodec_flush_buffers(dec->dec);
+    }
 
     int src_w = dec->dec->width;
     int src_h = dec->dec->height;
@@ -826,7 +849,17 @@ static int transcode_decoder_to_video(PVDecoder *dec, const char *output_path, i
         if (ret < 0 && ret != AVERROR(EAGAIN)) { set_av_error("transcode avcodec_send_packet", ret); goto transcode_fail; }
 
         while ((ret = avcodec_receive_frame(dec->dec, dec->frame)) >= 0) {
-            if (dec->frame->best_effort_timestamp != AV_NOPTS_VALUE) dec->frame->pts = dec->frame->best_effort_timestamp;
+            int64_t frame_ts = dec->frame->best_effort_timestamp;
+            if (frame_ts != AV_NOPTS_VALUE) dec->frame->pts = frame_ts;
+            if (start_ts != AV_NOPTS_VALUE && frame_ts != AV_NOPTS_VALUE && frame_ts < start_ts) {
+                av_frame_unref(dec->frame);
+                continue;
+            }
+            if (end_ts != AV_NOPTS_VALUE && frame_ts != AV_NOPTS_VALUE && frame_ts >= end_ts) {
+                av_frame_unref(dec->frame);
+                ret = AVERROR_EOF;
+                goto decode_done;
+            }
             ret = av_buffersrc_add_frame_flags(src_ctx, dec->frame, AV_BUFFERSRC_FLAG_KEEP_REF);
             av_frame_unref(dec->frame);
             if (ret < 0) { set_av_error("filter av_buffersrc_add_frame", ret); goto transcode_fail; }
@@ -837,6 +870,7 @@ static int transcode_decoder_to_video(PVDecoder *dec, const char *output_path, i
     }
     if (ret < 0 && ret != AVERROR_EOF) { set_av_error("transcode av_read_frame", ret); goto transcode_fail; }
 
+decode_done:
     ret = avcodec_send_packet(dec->dec, NULL);
     if (ret >= 0) {
         while ((ret = avcodec_receive_frame(dec->dec, dec->frame)) >= 0) {
@@ -884,7 +918,14 @@ int pv_transcode_video_resize(const char *input_path, const char *output_path, i
     if (!input_path || !output_path) { set_error("pv_transcode_video_resize: nil path"); return AVERROR(EINVAL); }
     PVDecoder *dec = pv_decoder_open(input_path);
     if (!dec) return AVERROR(EINVAL);
-    return transcode_decoder_to_video(dec, output_path, target_width, 0.0);
+    return transcode_decoder_to_video(dec, output_path, target_width, 0.0, 0.0, 0.0);
+}
+
+int pv_transcode_video_slice(const char *input_path, const char *output_path, double start_seconds, double duration_seconds, int target_width, double target_fps) {
+    if (!input_path || !output_path) { set_error("pv_transcode_video_slice: nil path"); return AVERROR(EINVAL); }
+    PVDecoder *dec = pv_decoder_open(input_path);
+    if (!dec) return AVERROR(EINVAL);
+    return transcode_decoder_to_video(dec, output_path, target_width, target_fps, start_seconds, duration_seconds);
 }
 
 int pv_transcode_concat_video(const char *list_path, const char *output_path, int target_width, double target_fps) {
@@ -898,5 +939,5 @@ int pv_transcode_concat_video(const char *list_path, const char *output_path, in
     PVDecoder *dec = pv_decoder_open_with_input_format(list_path, concat_fmt, &opts);
     av_dict_free(&opts);
     if (!dec) return AVERROR(EINVAL);
-    return transcode_decoder_to_video(dec, output_path, target_width, target_fps);
+    return transcode_decoder_to_video(dec, output_path, target_width, target_fps, 0.0, 0.0);
 }

@@ -22,6 +22,7 @@ type thumbJob struct {
 	Start   float64
 	End     float64
 	Bicubic bool
+	Fast    bool
 }
 
 type thumbResult struct {
@@ -277,20 +278,14 @@ func generatePreviewFromPath(ctx context.Context, input, output string, info Med
 		return nil, err
 	}
 
-	resizeFinal := opts.Width > 0 && info.Width > 0 && opts.Width < info.Width
 	listPath := filepath.Join(partsDir, "concat.txt")
 	if err := writeConcatList(listPath, parts); err != nil {
 		return nil, err
 	}
 
-	// Final leg only: decode the concat demuxer with inpoint/outpoint and encode
-	// once. This preserves the fast parallel stream-copy slice step while avoiding
-	// duplicate GOP pre-roll frames in the final preview.
-	targetWidth := 0
-	if resizeFinal {
-		targetWidth = opts.Width
-	}
-	if err := TranscodeConcatVideo(listPath, output, targetWidth, info.FPS); err != nil {
+	// Parts are already encoded with final dimensions and FPS, so concat is a
+	// fast stream copy rather than a second full decode/encode pass.
+	if err := ConcatVideoSegments(listPath, output); err != nil {
 		return nil, err
 	}
 	if progress != nil {
@@ -343,12 +338,18 @@ func copyPreviewSlicesFromPath(ctx context.Context, input, partsDir string, info
 					resCh <- previewJobResult{Index: j.Index, Err: err}
 					continue
 				}
-				meta, err := CopyVideoSliceDetailed(input, j.Path, j.Start, sliceSeconds)
+				targetWidth := 0
+				if opts.Width > 0 && info.Width > 0 && opts.Width < info.Width {
+					targetWidth = opts.Width
+				}
+				err := TranscodeVideoSlice(input, j.Path, j.Start, sliceSeconds, targetWidth, previewFPS(info.FPS, opts.FPS))
 				if err != nil {
 					resCh <- previewJobResult{Index: j.Index, Err: fmt.Errorf("preview worker %d part %d: %w", id, j.Index, err)}
 					continue
 				}
-				resCh <- previewJobResult{Index: j.Index, Path: j.Path, Meta: meta}
+				resCh <- previewJobResult{Index: j.Index, Path: j.Path, Meta: copiedSliceMeta{
+					RequestedStart: j.Start, ActualStart: j.Start, CopiedDuration: sliceSeconds,
+				}}
 			}
 		}(w)
 	}
@@ -455,7 +456,7 @@ func extractThumbnailsFromPath(ctx context.Context, input string, info MediaInfo
 		en := float64(i+1) * interval
 		at := offset + (float64(i)+0.5)*sampleRange/float64(total)
 		at = math.Max(0.05, math.Min(at, info.Duration-0.05))
-		jobs[i] = thumbJob{Index: i, At: at, Start: st, End: en}
+		jobs[i] = thumbJob{Index: i, At: at, Start: st, End: en, Fast: opts.FastSeek}
 	}
 
 	return extractThumbnailJobs(ctx, input, jobs, opts.ThumbWidth, workers, progress)
@@ -501,7 +502,13 @@ func extractThumbnailJobs(ctx context.Context, input string, jobs []thumbJob, th
 				}
 				var th Thumb
 				var err error
-				if j.Bicubic {
+				if j.Fast {
+					if j.Bicubic {
+						th, err = dec.SeekThumbnailFastBicubic(j.At, thumbWidth)
+					} else {
+						th, err = dec.SeekThumbnailFast(j.At, thumbWidth)
+					}
+				} else if j.Bicubic {
 					th, err = dec.SeekThumbnailBicubic(j.At, thumbWidth)
 				} else {
 					th, err = dec.SeekThumbnail(j.At, thumbWidth)
@@ -548,6 +555,16 @@ func extractThumbnailJobs(ctx context.Context, input string, jobs []thumbJob, th
 
 	sort.Slice(thumbs, func(i, j int) bool { return thumbs[i].Index < thumbs[j].Index })
 	return thumbs, nil
+}
+
+func previewFPS(sourceFPS, requestedFPS float64) float64 {
+	if requestedFPS > 0 {
+		return requestedFPS
+	}
+	if sourceFPS >= 50 {
+		return 24000.0 / 1001.0
+	}
+	return sourceFPS
 }
 
 func effectiveEdgeOffset(duration, requiredSpan, requested float64) float64 {
