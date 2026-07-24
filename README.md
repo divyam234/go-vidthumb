@@ -27,10 +27,18 @@ The public API is intentionally split into independent pieces:
 | Raw thumbnails only | `ExtractThumbnails`, `ExtractThumbnailsFromFile`, `ExtractThumbnailsFromReadSeeker` |
 | Sprite only | `GenerateSprite`, `GenerateSpriteFromFile`, `GenerateSpriteFromReadSeeker` |
 | Preview only | `GeneratePreview`, `GeneratePreviewFromFile`, `GeneratePreviewFromReadSeeker` |
+| Lossless file remux | `RemuxFromFile` |
 | Preview + sprite convenience flow | `Generate`, `GenerateFromFile`, `GenerateFromReadSeeker` |
 | pHash, API-only | `CalculatePHash`, `CalculatePHashFromFile`, `CalculatePHashFromReadSeeker`, `ComputePHashFromThumbnails` |
 
 pHash is **not** exposed in the CLI and is not coupled to preview/sprite generation. It reuses the thumbnail extraction pipeline with pHash-specific options.
+
+`RemuxFromFile` copies video and audio streams into the output container without
+decoding or re-encoding and enables MP4 faststart. It is equivalent to:
+
+```bash
+ffmpeg -i input.mkv -map 0:v? -map 0:a? -c copy -movflags +faststart output.mp4
+```
 
 `SpriteOptions.OffsetSeconds` and `PreviewOptions.OffsetSeconds` exclude a
 duration from both media edges when selecting frames and preview slices. The

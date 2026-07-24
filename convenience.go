@@ -2,7 +2,10 @@ package previewer
 
 import (
 	"context"
+	"errors"
 	"io"
+	"os"
+	"path/filepath"
 )
 
 func GenerateFromFile(ctx context.Context, path string, outputs OutputPaths, opts Options) (Result, error) {
@@ -51,4 +54,37 @@ func ProbeFile(ctx context.Context, path string) (MediaInfo, error) {
 
 func ProbeReadSeeker(ctx context.Context, name string, r io.ReadSeeker) (MediaInfo, error) {
 	return ProbeSource(ctx, FromReadSeeker(name, r))
+}
+
+// RemuxFromFile copies video and audio streams into a new container without
+// decoding or re-encoding and enables faststart for MP4 output.
+func RemuxFromFile(ctx context.Context, inputPath, outputPath string) error {
+	if inputPath == "" {
+		return errors.New("inputPath is required")
+	}
+	if outputPath == "" {
+		return errors.New("outputPath is required")
+	}
+	if err := checkContext(ctx); err != nil {
+		return err
+	}
+	inputAbs, err := filepath.Abs(inputPath)
+	if err != nil {
+		return err
+	}
+	outputAbs, err := filepath.Abs(outputPath)
+	if err != nil {
+		return err
+	}
+	if inputAbs == outputAbs {
+		return errors.New("inputPath and outputPath must differ")
+	}
+	if err := os.MkdirAll(filepath.Dir(outputPath), 0755); err != nil {
+		return err
+	}
+	if err := remuxFile(inputPath, outputPath); err != nil {
+		_ = os.Remove(outputPath)
+		return err
+	}
+	return nil
 }

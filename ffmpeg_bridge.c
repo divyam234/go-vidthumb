@@ -585,6 +585,106 @@ int pv_concat_video_segments(const char *list_path, const char *output_path) {
     return 0;
 }
 
+int pv_remux_file(const char *input_path, const char *output_path) {
+    if (!input_path || !output_path) { set_error("pv_remux_file: nil path"); return AVERROR(EINVAL); }
+    pv_ffmpeg_init();
+
+    AVFormatContext *ifmt = NULL;
+    int ret = avformat_open_input(&ifmt, input_path, NULL, NULL);
+    if (ret < 0) { set_av_error("remux avformat_open_input", ret); return ret; }
+    ret = avformat_find_stream_info(ifmt, NULL);
+    if (ret < 0) { set_av_error("remux avformat_find_stream_info", ret); close_input(&ifmt); return ret; }
+
+    AVFormatContext *ofmt = NULL;
+    int *stream_map = NULL;
+    ret = avformat_alloc_output_context2(&ofmt, NULL, NULL, output_path);
+    if (ret < 0 || !ofmt) {
+        set_av_error("remux avformat_alloc_output_context2", ret);
+        close_input(&ifmt);
+        return ret < 0 ? ret : AVERROR(EINVAL);
+    }
+
+    stream_map = av_malloc_array(ifmt->nb_streams, sizeof(*stream_map));
+    if (!stream_map) { set_error("remux stream map allocation failed"); ret = AVERROR(ENOMEM); goto fail; }
+    for (unsigned int i = 0; i < ifmt->nb_streams; i++) stream_map[i] = -1;
+
+    for (unsigned int i = 0; i < ifmt->nb_streams; i++) {
+        AVStream *in_st = ifmt->streams[i];
+        enum AVMediaType type = in_st->codecpar->codec_type;
+        if (type != AVMEDIA_TYPE_VIDEO && type != AVMEDIA_TYPE_AUDIO) continue;
+        AVStream *out_st = avformat_new_stream(ofmt, NULL);
+        if (!out_st) { set_error("remux avformat_new_stream failed"); ret = AVERROR(ENOMEM); goto fail; }
+        stream_map[i] = out_st->index;
+        ret = avcodec_parameters_copy(out_st->codecpar, in_st->codecpar);
+        if (ret < 0) { set_av_error("remux avcodec_parameters_copy", ret); goto fail; }
+        out_st->codecpar->codec_tag = 0;
+        out_st->time_base = in_st->time_base;
+        out_st->disposition = in_st->disposition;
+        out_st->avg_frame_rate = in_st->avg_frame_rate;
+        out_st->sample_aspect_ratio = in_st->sample_aspect_ratio;
+        av_dict_copy(&out_st->metadata, in_st->metadata, 0);
+    }
+    if (ofmt->nb_streams == 0) { set_error("remux input has no video or audio streams"); ret = AVERROR_STREAM_NOT_FOUND; goto fail; }
+    av_dict_copy(&ofmt->metadata, ifmt->metadata, 0);
+    if (ifmt->nb_chapters > 0) {
+        ofmt->chapters = av_calloc(ifmt->nb_chapters, sizeof(*ofmt->chapters));
+        if (!ofmt->chapters) { set_error("remux chapter allocation failed"); ret = AVERROR(ENOMEM); goto fail; }
+        ofmt->nb_chapters = ifmt->nb_chapters;
+        for (unsigned int i = 0; i < ifmt->nb_chapters; i++) {
+            AVChapter *in_chapter = ifmt->chapters[i];
+            AVChapter *out_chapter = av_mallocz(sizeof(*out_chapter));
+            if (!out_chapter) { set_error("remux chapter allocation failed"); ret = AVERROR(ENOMEM); goto fail; }
+            out_chapter->id = in_chapter->id;
+            out_chapter->time_base = in_chapter->time_base;
+            out_chapter->start = in_chapter->start;
+            out_chapter->end = in_chapter->end;
+            av_dict_copy(&out_chapter->metadata, in_chapter->metadata, 0);
+            ofmt->chapters[i] = out_chapter;
+        }
+    }
+
+    if (!(ofmt->oformat->flags & AVFMT_NOFILE)) {
+        ret = avio_open(&ofmt->pb, output_path, AVIO_FLAG_WRITE);
+        if (ret < 0) { set_av_error("remux avio_open output", ret); goto fail; }
+    }
+
+    AVDictionary *mux_opts = NULL;
+    av_dict_set(&mux_opts, "movflags", "+faststart", 0);
+    ret = avformat_write_header(ofmt, &mux_opts);
+    av_dict_free(&mux_opts);
+    if (ret < 0) { set_av_error("remux avformat_write_header", ret); goto fail; }
+
+    AVPacket *pkt = av_packet_alloc();
+    if (!pkt) { set_error("remux av_packet_alloc failed"); ret = AVERROR(ENOMEM); goto fail; }
+    while ((ret = av_read_frame(ifmt, pkt)) >= 0) {
+        int output_index = stream_map[pkt->stream_index];
+        if (output_index < 0) { av_packet_unref(pkt); continue; }
+        AVStream *in_st = ifmt->streams[pkt->stream_index];
+        AVStream *out_st = ofmt->streams[output_index];
+        av_packet_rescale_ts(pkt, in_st->time_base, out_st->time_base);
+        pkt->stream_index = output_index;
+        pkt->pos = -1;
+        ret = av_interleaved_write_frame(ofmt, pkt);
+        av_packet_unref(pkt);
+        if (ret < 0) { set_av_error("remux av_interleaved_write_frame", ret); av_packet_free(&pkt); goto fail; }
+    }
+    av_packet_free(&pkt);
+    if (ret != AVERROR_EOF) { set_av_error("remux av_read_frame", ret); goto fail; }
+
+    ret = av_write_trailer(ofmt);
+    if (ret < 0) { set_av_error("remux av_write_trailer", ret); goto fail; }
+    av_freep(&stream_map);
+    close_output(&ofmt);
+    close_input(&ifmt);
+    return 0;
+
+fail:
+    av_freep(&stream_map);
+    close_output(&ofmt);
+    close_input(&ifmt);
+    return ret;
+}
+
 
 static const AVCodec *choose_video_encoder(enum AVCodecID *codec_id) {
     const AVCodec *codec = avcodec_find_encoder_by_name("libx264");

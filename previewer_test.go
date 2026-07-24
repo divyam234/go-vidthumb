@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
+	"errors"
 	"fmt"
 	"io"
 	"math"
@@ -35,6 +36,52 @@ func TestProbeReturnsCodecAndBitrate(t *testing.T) {
 	}
 	if info.Bitrate <= 0 {
 		t.Fatalf("bitrate = %d, want positive value", info.Bitrate)
+	}
+}
+
+func TestRemuxFromFileCopiesVideoAndAudioWithoutTranscoding(t *testing.T) {
+	ffmpegPath := ffmpegCLIPath(t)
+	dir := t.TempDir()
+	input := filepath.Join(dir, "input.mkv")
+	output := filepath.Join(dir, "nested", "output.mp4")
+	cmd := ffmpegCLICommand(ffmpegPath,
+		"-hide_banner", "-loglevel", "error", "-y",
+		"-f", "lavfi", "-i", "testsrc2=size=160x90:rate=10:duration=1",
+		"-f", "lavfi", "-i", "sine=frequency=1000:duration=1",
+		"-map", "0:v", "-map", "1:a",
+		"-c:v", "mpeg4", "-c:a", "aac", input,
+	)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("create remux input: %v\n%s", err, out)
+	}
+
+	if err := RemuxFromFile(context.Background(), input, output); err != nil {
+		t.Fatalf("remux: %v", err)
+	}
+	info, err := Probe(output)
+	if err != nil {
+		t.Fatalf("probe remux output: %v", err)
+	}
+	if info.VideoCodec != "mpeg4" || info.AudioCodec != "aac" {
+		t.Fatalf("output codecs = video %q audio %q, want unchanged mpeg4/aac", info.VideoCodec, info.AudioCodec)
+	}
+	b, err := os.ReadFile(output)
+	if err != nil {
+		t.Fatal(err)
+	}
+	moov := bytes.Index(b, []byte("moov"))
+	mdat := bytes.Index(b, []byte("mdat"))
+	if moov < 0 || mdat < 0 || moov > mdat {
+		t.Fatalf("MP4 is not faststart: moov=%d mdat=%d", moov, mdat)
+	}
+}
+
+func TestRemuxFromFileRejectsCancelledContext(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	err := RemuxFromFile(ctx, testInputPath(t), filepath.Join(t.TempDir(), "output.mp4"))
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("error = %v, want context.Canceled", err)
 	}
 }
 

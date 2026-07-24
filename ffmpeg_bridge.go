@@ -208,6 +208,17 @@ func ConcatVideoSegments(listPath, output string) error {
 	return nil
 }
 
+func remuxFile(input, output string) error {
+	cin := C.CString(input)
+	cout := C.CString(output)
+	defer C.free(unsafe.Pointer(cin))
+	defer C.free(unsafe.Pointer(cout))
+	if rc := C.pv_remux_file(cin, cout); rc < 0 {
+		return fmt.Errorf("remux file failed: %s", lastFFErr())
+	}
+	return nil
+}
+
 func TranscodeVideoResize(input, output string, targetWidth int) error {
 	cin := C.CString(input)
 	cout := C.CString(output)
